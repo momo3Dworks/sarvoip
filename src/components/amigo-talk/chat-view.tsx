@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -9,7 +10,9 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Smile } from 'lucide-react';
+import { Paperclip, Smile } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { resizeImage } from '@/lib/utils';
 
 interface User {
   uid: string;
@@ -23,7 +26,8 @@ interface ChatViewProps {
 
 interface Message {
   id: string;
-  text: string;
+  text?: string;
+  imageUrl?: string;
   senderId: string;
   senderName: string | null;
   timestamp: any;
@@ -35,6 +39,8 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     const messagesColRef = collection(db, 'calls', callId, 'messages');
@@ -57,19 +63,46 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
     }
   }, [messages]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newMessage.trim() === '') return;
+  const sendMessage = async (text: string, imageUrl?: string) => {
+    if (text.trim() === '' && !imageUrl) return;
 
     const messagesColRef = collection(db, 'calls', callId, 'messages');
     await addDoc(messagesColRef, {
-      text: newMessage,
+      text: text.trim(),
+      imageUrl: imageUrl || null,
       senderId: currentUser.uid,
       senderName: currentUser.name || "Anonymous",
       timestamp: serverTimestamp(),
     });
 
     setNewMessage('');
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    sendMessage(newMessage);
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast({ variant: 'destructive', title: 'Invalid file type', description: 'Please select an image file.' });
+      return;
+    }
+
+    try {
+      const resizedImageUrl = await resizeImage(file, 800, 800);
+      await sendMessage(newMessage, resizedImageUrl);
+    } catch (error) {
+      console.error("Error processing image:", error);
+      toast({ variant: 'destructive', title: 'Image Upload Failed', description: 'Could not process the image. Please try again.' });
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   const handleEmojiSelect = (emoji: string) => {
@@ -109,7 +142,15 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
                   {msg.senderId !== currentUser.uid && (
                     <p className="font-semibold mb-1">{displayName(msg.senderName)}</p>
                   )}
-                  <p>{msg.text}</p>
+                  {msg.imageUrl && (
+                    <img
+                      src={msg.imageUrl}
+                      alt="Shared content"
+                      className="rounded-md max-w-full h-auto my-2 cursor-pointer"
+                      onClick={() => window.open(msg.imageUrl, '_blank')}
+                    />
+                  )}
+                  {msg.text && <p>{msg.text}</p>}
                 </div>
               </div>
             ))}
@@ -117,13 +158,17 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
         </ScrollArea>
       </CardContent>
       <CardFooter className="border-t p-4">
-        <form onSubmit={handleSendMessage} className="flex w-full items-center gap-2">
+        <form onSubmit={handleFormSubmit} className="flex w-full items-center gap-2">
           <Input
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             placeholder="Type a message..."
             autoComplete="off"
           />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*" className="hidden" />
+          <Button variant="outline" size="icon" type="button" onClick={() => fileInputRef.current?.click()}>
+            <Paperclip className="h-5 w-5" />
+          </Button>
            <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="icon" type="button">

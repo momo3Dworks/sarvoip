@@ -10,10 +10,11 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Smile } from 'lucide-react';
+import { Paperclip, Smile } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
+import { resizeImage } from '@/lib/utils';
 
 const emojis = [
   '😊', '😂', '❤️', '👍', '🤔', '🎉', '🔥', '🙏', '😍', '😭', '🤯', '🥳',
@@ -22,7 +23,8 @@ const emojis = [
 
 interface LobbyMessage {
   id: string;
-  text: string;
+  text?: string;
+  imageUrl?: string;
   senderId: string;
   senderName: string | null;
   timestamp: any;
@@ -38,7 +40,17 @@ const Message = ({ message }: { message: LobbyMessage }) => {
     return (
         <div>
             <span className="font-black uppercase">{senderName}:</span>
-            <span className="ml-2">{message.text}</span>
+            {message.text && <span className="ml-2">{message.text}</span>}
+            {message.imageUrl && (
+                <div className="ml-2 mt-1">
+                    <img 
+                        src={message.imageUrl} 
+                        alt="Shared content" 
+                        className="rounded-md max-w-xs h-auto my-1 border cursor-pointer"
+                        onClick={() => window.open(message.imageUrl, '_blank')}
+                    />
+                </div>
+            )}
         </div>
     );
 };
@@ -73,6 +85,7 @@ export function LobbyChat() {
     
     const scrollAreaRef = useRef<HTMLDivElement>(null);
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const isChatActive = isFocused || isHovering;
 
@@ -140,13 +153,13 @@ export function LobbyChat() {
         }, 3000);
     };
 
-    const handleSendMessage = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (newMessage.trim() === '' || !currentUser) return;
+    const sendMessage = async (text: string, imageUrl?: string) => {
+        if (!currentUser || (text.trim() === '' && !imageUrl)) return;
 
         const messagesColRef = collection(db, 'lobby_chat');
         await addDoc(messagesColRef, {
-            text: newMessage.trim(),
+            text: text.trim(),
+            imageUrl: imageUrl || null,
             senderId: currentUser.uid,
             senderName: currentUser.name,
             timestamp: serverTimestamp(),
@@ -155,6 +168,33 @@ export function LobbyChat() {
         setNewMessage('');
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         deleteDoc(doc(db, 'lobby_typing', currentUser.uid));
+    };
+
+    const handleFormSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        await sendMessage(newMessage);
+    };
+
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            toast({ variant: 'destructive', title: 'Invalid file type', description: 'Please select an image file.' });
+            return;
+        }
+
+        try {
+            const resizedImageUrl = await resizeImage(file, 800, 800);
+            await sendMessage(newMessage, resizedImageUrl);
+        } catch (error) {
+            console.error("Error processing image:", error);
+            toast({ variant: 'destructive', title: 'Image Upload Failed', description: 'Could not process the image. Please try again.' });
+        } finally {
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
     };
 
     const handleEmojiSelect = (emoji: string) => {
@@ -191,7 +231,7 @@ export function LobbyChat() {
                 </div>
             </CardContent>
             <CardFooter className="p-2 md:p-4 border-t">
-                <form onSubmit={handleSendMessage} className="flex w-full items-center gap-2">
+                <form onSubmit={handleFormSubmit} className="flex w-full items-center gap-2">
                     <Input
                         value={newMessage}
                         onChange={(e) => {
@@ -203,6 +243,10 @@ export function LobbyChat() {
                         onFocus={() => setIsFocused(true)}
                         onBlur={() => setIsFocused(false)}
                     />
+                    <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*" className="hidden" />
+                    <Button variant="outline" size="icon" type="button" onClick={() => fileInputRef.current?.click()}>
+                        <Paperclip className="h-5 w-5" />
+                    </Button>
                     <Popover>
                         <PopoverTrigger asChild>
                             <Button variant="outline" size="icon" type="button">
