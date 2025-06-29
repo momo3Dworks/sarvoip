@@ -12,8 +12,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Smile } from 'lucide-react';
 
 interface User {
-  id: string;
-  name: string;
+  uid: string;
+  name: string | null;
 }
 
 interface ChatViewProps {
@@ -25,7 +25,7 @@ interface Message {
   id: string;
   text: string;
   senderId: string;
-  senderName: string;
+  senderName: string | null;
   timestamp: any;
 }
 
@@ -64,8 +64,8 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
     const messagesColRef = collection(db, 'calls', callId, 'messages');
     await addDoc(messagesColRef, {
       text: newMessage,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
+      senderId: currentUser.uid,
+      senderName: currentUser.name || "Anonymous",
       timestamp: serverTimestamp(),
     });
 
@@ -75,6 +75,8 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
   const handleEmojiSelect = (emoji: string) => {
     setNewMessage(prev => prev + emoji);
   };
+  
+  const displayName = (name: string | null) => name || "Anonymous";
 
   return (
     <div className="w-full h-full flex flex-col bg-card">
@@ -88,24 +90,24 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
               <div
                 key={msg.id}
                 className={`flex items-start gap-3 ${
-                  msg.senderId === currentUser.id ? 'justify-end' : ''
+                  msg.senderId === currentUser.uid ? 'justify-end' : ''
                 }`}
               >
-                {msg.senderId !== currentUser.id && (
+                {msg.senderId !== currentUser.uid && (
                   <Avatar className="h-8 w-8">
-                    <AvatarImage src={`https://placehold.co/32x32.png?text=${msg.senderName.charAt(0)}`} data-ai-hint="person" />
-                    <AvatarFallback>{msg.senderName.charAt(0)}</AvatarFallback>
+                    <AvatarImage src={`https://placehold.co/32x32.png?text=${displayName(msg.senderName).charAt(0)}`} data-ai-hint="person" />
+                    <AvatarFallback>{displayName(msg.senderName).charAt(0)}</AvatarFallback>
                   </Avatar>
                 )}
                 <div
                   className={`max-w-[75%] rounded-lg p-3 text-sm ${
-                    msg.senderId === currentUser.id
+                    msg.senderId === currentUser.uid
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-muted'
                   }`}
                 >
-                  {msg.senderId !== currentUser.id && (
-                    <p className="font-semibold mb-1">{msg.senderName}</p>
+                  {msg.senderId !== currentUser.uid && (
+                    <p className="font-semibold mb-1">{displayName(msg.senderName)}</p>
                   )}
                   <p>{msg.text}</p>
                 </div>

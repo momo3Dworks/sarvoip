@@ -7,8 +7,8 @@ import { cn } from '@/lib/utils';
 import { MicOff } from 'lucide-react';
 
 interface Participant {
-  id: string;
-  name: string;
+  uid: string;
+  name: string | null;
 }
 
 interface ParticipantViewProps {
@@ -41,7 +41,9 @@ export function ParticipantView({
     }
   }, [volume]);
 
-  const displayName = isLocalParticipant ? 'You' : participant.name;
+  const pName = participant.name || 'Anonymous';
+  const displayName = isLocalParticipant ? 'You' : pName;
+  const fallbackChar = pName ? pName.charAt(0).toUpperCase() : "A";
 
   return (
     <div className="flex flex-col items-center space-y-3 w-48">
@@ -52,8 +54,8 @@ export function ParticipantView({
             isSpeaking && 'border-primary shadow-[0_0_25px_8px] shadow-primary/70'
           )}
         >
-          <AvatarImage src={`https://placehold.co/128x128.png?text=${participant.name.charAt(0)}`} data-ai-hint="person" />
-          <AvatarFallback className="text-4xl">{participant.name.charAt(0)}</AvatarFallback>
+          <AvatarImage src={`https://placehold.co/128x128.png?text=${fallbackChar}`} data-ai-hint="person" />
+          <AvatarFallback className="text-4xl">{fallbackChar}</AvatarFallback>
         </Avatar>
         {isMuted && (
             <div className="absolute bottom-2 right-2 bg-secondary rounded-full p-2">
@@ -73,7 +75,7 @@ export function ParticipantView({
             step={0.05}
             onValueChange={(value) => setVolume(value[0])}
             className="w-[80%]"
-            aria-label={`Volume for ${participant.name}`}
+            aria-label={`Volume for ${pName}`}
           />
         </>
       )}

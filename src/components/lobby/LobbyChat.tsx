@@ -1,8 +1,9 @@
+
 "use client";
 
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, onSnapshot, addDoc, serverTimestamp, query, orderBy, limit, doc, setDoc, deleteDoc, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, query, orderBy, limit, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { UserContext } from '@/context/UserProvider';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Smile, Gift, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useToast } from '@/hooks/use-toast';
 
 
 const GIPHY_API_KEY = 'YOUR_GIPHY_API_KEY_HERE'; 
@@ -24,22 +26,23 @@ const emojis = [
 
 interface LobbyMessage {
   id: string;
-  text: string; // can be text or GIF URL
+  text: string; 
   type: 'text' | 'gif';
   senderId: string;
-  senderName: string;
+  senderName: string | null;
   timestamp: any;
 }
 
 interface TypingUser {
-    id: string;
-    name: string;
+    uid: string;
+    name: string | null;
 }
 
 const Message = ({ message }: { message: LobbyMessage }) => {
+    const senderName = message.senderName || "Anonymous";
     return (
         <div>
-            <span className="font-black uppercase">{message.senderName}:</span>
+            <span className="font-black uppercase">{senderName}:</span>
             {message.type === 'text' ? (
                 <span className="ml-2">{message.text}</span>
             ) : (
@@ -52,7 +55,7 @@ const Message = ({ message }: { message: LobbyMessage }) => {
 const TypingIndicator = ({ users }: { users: TypingUser[] }) => {
     if (users.length === 0) return null;
 
-    const names = users.map(u => u.name).join(', ');
+    const names = users.map(u => u.name || "Anonymous").join(', ');
     const verb = users.length > 1 ? 'are' : 'is';
 
     return (
@@ -69,6 +72,7 @@ const TypingIndicator = ({ users }: { users: TypingUser[] }) => {
 
 export function LobbyChat() {
     const { user: currentUser } = useContext(UserContext);
+    const { toast } = useToast();
     const [messages, setMessages] = useState<LobbyMessage[]>([]);
     const [newMessage, setNewMessage] = useState('');
     const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
@@ -87,29 +91,45 @@ export function LobbyChat() {
     const isChatActive = isFocused || isHovering;
 
     useEffect(() => {
+        if (!currentUser) return;
         const messagesColRef = collection(db, 'lobby_chat');
         const q = query(messagesColRef, orderBy('timestamp', 'desc'), limit(50));
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const newMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LobbyMessage)).reverse();
             setMessages(newMessages);
+        }, (error) => {
+            console.error("Lobby chat snapshot error: ", error);
+            toast({
+                variant: "destructive",
+                title: "Chat Error",
+                description: "Could not load lobby messages. Check permissions or connection."
+            });
         });
 
         return () => unsubscribe();
-    }, []);
+    }, [currentUser, toast]);
 
      useEffect(() => {
+        if (!currentUser) return;
         const typingColRef = collection(db, 'lobby_typing');
-        const fiveSecondsAgo = new Date(Date.now() - 5000);
-        const q = query(typingColRef, where("timestamp", ">", fiveSecondsAgo));
         
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const users = snapshot.docs.map(doc => doc.data() as TypingUser).filter(u => u.id !== currentUser?.id);
+        const unsubscribe = onSnapshot(typingColRef, (snapshot) => {
+            const users = snapshot.docs
+                .map(doc => ({ uid: doc.id, ...doc.data() } as TypingUser))
+                .filter(u => u.uid !== currentUser.uid);
             setTypingUsers(users);
+        }, (error) => {
+            console.error("Typing indicator snapshot error: ", error);
+            toast({
+                variant: "destructive",
+                title: "Chat Error",
+                description: "Could not load typing indicators. Check permissions or connection."
+            });
         });
 
         return () => unsubscribe();
-     }, [currentUser?.id]);
+     }, [currentUser, toast]);
 
     useEffect(() => {
         if (scrollAreaRef.current) {
@@ -162,8 +182,8 @@ export function LobbyChat() {
             clearTimeout(typingTimeoutRef.current);
         }
 
-        const typingDocRef = doc(db, 'lobby_typing', currentUser.id);
-        setDoc(typingDocRef, { name: currentUser.name, id: currentUser.id, timestamp: serverTimestamp() });
+        const typingDocRef = doc(db, 'lobby_typing', currentUser.uid);
+        setDoc(typingDocRef, { name: currentUser.name, uid: currentUser.uid, timestamp: serverTimestamp() });
 
         typingTimeoutRef.current = setTimeout(() => {
             deleteDoc(typingDocRef);
@@ -178,14 +198,14 @@ export function LobbyChat() {
         await addDoc(messagesColRef, {
             text: newMessage.trim(),
             type: 'text',
-            senderId: currentUser.id,
+            senderId: currentUser.uid,
             senderName: currentUser.name,
             timestamp: serverTimestamp(),
         });
 
         setNewMessage('');
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-        deleteDoc(doc(db, 'lobby_typing', currentUser.id));
+        deleteDoc(doc(db, 'lobby_typing', currentUser.uid));
     };
     
     const handleSendGif = async (gifUrl: string) => {
@@ -194,7 +214,7 @@ export function LobbyChat() {
         await addDoc(messagesColRef, {
             text: gifUrl,
             type: 'gif',
-            senderId: currentUser.id,
+            senderId: currentUser.uid,
             senderName: currentUser.name,
             timestamp: serverTimestamp(),
         });

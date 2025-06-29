@@ -34,8 +34,8 @@ interface CallViewProps {
 }
 
 interface Participant {
-  id: string;
-  name: string;
+  uid: string;
+  name: string | null;
 }
 
 const servers = {
@@ -98,16 +98,16 @@ export function CallView({ callId }: CallViewProps) {
         return;
       }
 
-      await setDoc(doc(participantsColRef, currentUser.id), { name: currentUser.name });
+      await setDoc(doc(participantsColRef, currentUser.uid), { name: currentUser.name });
 
       const participantsUnsub = onSnapshot(participantsColRef, (snapshot) => {
-        const currentParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Participant[]);
+        const currentParticipants = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }) as Participant);
         setParticipants(currentParticipants);
-        const remoteParticipants = currentParticipants.filter(p => p.id !== currentUser.id);
+        const remoteParticipants = currentParticipants.filter(p => p.uid !== currentUser.uid);
 
         // Remove connections for participants who have left
         peersRef.current.forEach((pc, peerId) => {
-            if (!remoteParticipants.some(p => p.id === peerId)) {
+            if (!remoteParticipants.some(p => p.uid === peerId)) {
                 pc.close();
                 peersRef.current.delete(peerId);
                 analysersRef.current.get(peerId)?.source.disconnect();
@@ -122,49 +122,53 @@ export function CallView({ callId }: CallViewProps) {
 
         // Create connections for new participants
         remoteParticipants.forEach(async (participant) => {
-            if (peersRef.current.has(participant.id)) return;
+            if (peersRef.current.has(participant.uid) || !currentUser) return;
 
             const pc = new RTCPeerConnection(servers);
-            peersRef.current.set(participant.id, pc);
+            peersRef.current.set(participant.uid, pc);
 
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
             pc.onicecandidate = event => {
-                if (event.candidate) {
-                    addDoc(signalingColRef, { from: currentUser.id, to: participant.id, candidate: event.candidate.toJSON() });
+                if (event.candidate && currentUser) {
+                    addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, candidate: event.candidate.toJSON() });
                 }
             };
 
             pc.ontrack = event => {
                 const stream = event.streams[0];
-                setRemoteStreams(prev => new Map(prev).set(participant.id, stream));
-                if (audioContextRef.current && !analysersRef.current.has(participant.id)) {
+                setRemoteStreams(prev => new Map(prev).set(participant.uid, stream));
+                if (audioContextRef.current && !analysersRef.current.has(participant.uid)) {
                     const analyser = audioContextRef.current.createAnalyser();
                     const source = audioContextRef.current.createMediaStreamSource(stream);
                     source.connect(analyser);
-                    analysersRef.current.set(participant.id, { analyser, source });
+                    analysersRef.current.set(participant.uid, { analyser, source });
                 }
             };
             
             // Create and send offer
             try {
+                if(!currentUser) return;
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
                 if (pc.localDescription) {
-                    await addDoc(signalingColRef, { from: currentUser.id, to: participant.id, offer: pc.localDescription.toJSON() });
+                    await addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, offer: pc.localDescription.toJSON() });
                 }
             } catch (err) {
                 console.error("Error creating offer:", err);
             }
         });
         setCallStatus('Connected');
+      }, (error) => {
+          console.error("Participants snapshot error: ", error);
+          toast({ variant: 'destructive', title: 'Connection error', description: 'Could not load participants.' });
       });
       
       const signalingUnsub = onSnapshot(query(signalingColRef), (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
-            if (change.type === 'added') {
+            if (change.type === 'added' && currentUser) {
                 const message = change.doc.data();
-                if (message.to !== currentUser.id) return;
+                if (message.to !== currentUser.uid) return;
 
                 const peerId = message.from;
                 const pc = peersRef.current.get(peerId);
@@ -173,17 +177,19 @@ export function CallView({ callId }: CallViewProps) {
                 try {
                     if (message.offer) {
                         if (pc.signalingState !== 'stable') {
-                            console.warn("Glare condition: received offer while not in stable state. Ignoring.");
+                             console.log("Ignoring offer, not in stable state");
                             return;
                         }
                         await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                         const answer = await pc.createAnswer();
                         await pc.setLocalDescription(answer);
                         if (pc.localDescription) {
-                            await addDoc(signalingColRef, { from: currentUser.id, to: peerId, answer: pc.localDescription.toJSON() });
+                            await addDoc(signalingColRef, { from: currentUser.uid, to: peerId, answer: pc.localDescription.toJSON() });
                         }
                     } else if (message.answer) {
-                        await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                        if (pc.signalingState === 'have-local-offer') {
+                            await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                        }
                     } else if (message.candidate) {
                         if (pc.remoteDescription) {
                             await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
@@ -196,6 +202,9 @@ export function CallView({ callId }: CallViewProps) {
                 }
             }
         });
+      }, (error) => {
+          console.error("Signaling snapshot error: ", error);
+          toast({ variant: 'destructive', title: 'Connection error', description: 'Call signaling failed.' });
       });
 
       return () => {
@@ -234,7 +243,7 @@ export function CallView({ callId }: CallViewProps) {
                 newSpeaking.set(id, isCurrentlySpeaking);
             };
             if (localAnalyserRef.current && currentUser) {
-                checkLevel(localAnalyserRef.current.analyser, currentUser.id, isMuted);
+                checkLevel(localAnalyserRef.current.analyser, currentUser.uid, isMuted);
             }
             analysersRef.current.forEach(({ analyser }, peerId) => {
                 checkLevel(analyser, peerId, false);
@@ -249,15 +258,15 @@ export function CallView({ callId }: CallViewProps) {
   const handleEndCall = async () => {
     setCallStatus('Call ended');
     if(currentUser) {
-        await deleteDoc(doc(db, 'calls', callId, 'participants', currentUser.id));
-        const userDocRef = doc(db, 'users', currentUser.id);
-        if (await getDoc(userDocRef)) {
-            await updateDoc(userDocRef, {
-                status: 'online',
-                currentCallId: deleteField()
-            });
-        }
+        const userDocRef = doc(db, 'users', currentUser.uid);
+        await updateDoc(userDocRef, {
+            status: 'online',
+            currentCallId: deleteField()
+        }).catch(err => console.error("Could not update my own status on call end:", err));
+        
+        await deleteDoc(doc(db, 'calls', callId, 'participants', currentUser.uid));
     }
+
     const participantsSnapshot = await getDocs(collection(db, 'calls', callId, 'participants'));
     if(participantsSnapshot.empty) {
         try {
@@ -282,26 +291,26 @@ export function CallView({ callId }: CallViewProps) {
     setIsMuted(prev => !prev);
   };
 
-  const localParticipant = currentUser ? participants.find(p => p.id === currentUser.id) : null;
-  const remoteParticipants = currentUser ? participants.filter(p => p.id !== currentUser.id) : participants;
+  const localParticipant = currentUser ? participants.find(p => p.uid === currentUser.uid) : null;
+  const remoteParticipants = currentUser ? participants.filter(p => p.uid !== currentUser.uid) : participants;
 
   const ParticipantsGrid = () => (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-8 p-4">
       {localParticipant && (
         <ParticipantView
-          key={localParticipant.id}
+          key={localParticipant.uid}
           participant={localParticipant}
           isMuted={isMuted}
           isLocalParticipant={true}
-          isSpeaking={speaking.get(localParticipant.id) || false}
+          isSpeaking={speaking.get(localParticipant.uid) || false}
         />
       )}
       {remoteParticipants.map(p => (
         <ParticipantView
-          key={p.id}
+          key={p.uid}
           participant={p}
-          stream={remoteStreams.get(p.id)}
-          isSpeaking={speaking.get(p.id) || false}
+          stream={remoteStreams.get(p.uid)}
+          isSpeaking={speaking.get(p.uid) || false}
         />
       ))}
     </div>
@@ -335,7 +344,6 @@ export function CallView({ callId }: CallViewProps) {
 
   return (
     <div className="flex h-screen w-full flex-col md:flex-row items-stretch bg-background text-foreground">
-        {/* Desktop Chat View */}
         {!isMobile && currentUser && (
             <div className="w-full max-w-sm border-r">
                  <ChatView callId={callId} currentUser={currentUser} />

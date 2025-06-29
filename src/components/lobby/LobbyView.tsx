@@ -24,8 +24,8 @@ import { LobbyChat } from './LobbyChat';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 interface OnlineUser {
-  id: string;
-  name: string;
+  uid: string;
+  name: string | null;
   status: 'online' | 'in-call';
   currentCallId?: string;
 }
@@ -41,37 +41,40 @@ export function LobbyView() {
   useEffect(() => {
     if (!currentUser) return;
 
-    const userDocRef = doc(db, 'users', currentUser.id);
-
+    // Set user presence in Firestore
+    const userDocRef = doc(db, 'users', currentUser.uid);
     setDoc(userDocRef, { name: currentUser.name, status: 'online', last_seen: serverTimestamp() }, { merge: true });
 
-    const handleBeforeUnload = () => {
-        deleteDoc(userDocRef);
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
+    // Listen for other users
     const usersCollectionRef = collection(db, 'users');
     const unsubscribe = onSnapshot(usersCollectionRef, (snapshot) => {
       const users: OnlineUser[] = [];
       snapshot.forEach((doc) => {
-        if (doc.id !== currentUser.id) {
-          users.push({ id: doc.id, ...doc.data() } as OnlineUser);
+        // Exclude current user from the list
+        if (doc.id !== currentUser.uid) {
+          users.push({ uid: doc.id, ...doc.data() } as OnlineUser);
         } else {
+            // Check my own status for redirecting to a call
             const myData = doc.data();
             if(myData.status === 'in-call' && myData.currentCallId) {
-                router.push(`/call/${myData.currentCallId}`);
+                if(!window.location.pathname.includes('/call/')) {
+                    router.push(`/call/${myData.currentCallId}`);
+                }
             }
         }
       });
       setOnlineUsers(users);
       setIsLoading(false);
+    }, (error) => {
+        console.error("Lobby users snapshot error: ", error);
+        toast({ variant: "destructive", title: "Connection Error", description: "Could not fetch online users."});
+        setIsLoading(false);
     });
 
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
       unsubscribe();
     };
-  }, [currentUser, router]);
+  }, [currentUser, router, toast]);
 
   const handleStartCall = async (targetUser: OnlineUser) => {
     if (!currentUser) return;
@@ -79,13 +82,12 @@ export function LobbyView() {
     try {
       const callDocRef = await addDoc(collection(db, "calls"), {
         createdAt: serverTimestamp(),
-        initiator: currentUser.id,
-        participants: {},
+        initiator: currentUser.uid,
       });
       const callId = callDocRef.id;
 
-      const currentUserDocRef = doc(db, 'users', currentUser.id);
-      const targetUserDocRef = doc(db, 'users', targetUser.id);
+      const currentUserDocRef = doc(db, 'users', currentUser.uid);
+      const targetUserDocRef = doc(db, 'users', targetUser.uid);
       
       await updateDoc(currentUserDocRef, { status: 'in-call', currentCallId: callId });
       await updateDoc(targetUserDocRef, { status: 'in-call', currentCallId: callId });
@@ -102,9 +104,23 @@ export function LobbyView() {
     }
   };
 
-  const handleJoinCall = (callId: string) => {
-     router.push(`/call/${callId}`);
+  const handleJoinCall = async (callId: string) => {
+    if(!currentUser) return;
+    try {
+        const currentUserDocRef = doc(db, 'users', currentUser.uid);
+        await updateDoc(currentUserDocRef, { status: 'in-call', currentCallId: callId });
+        router.push(`/call/${callId}`);
+    } catch(error) {
+        console.error("Error joining call:", error);
+        toast({
+            variant: "destructive",
+            title: "Failed to join call",
+            description: "The call may no longer be active.",
+        });
+    }
   };
+  
+  const displayName = (user: OnlineUser) => user.name || "Anonymous";
 
   return (
     <div className="flex h-screen w-full items-center justify-center bg-background p-4">
@@ -127,22 +143,22 @@ export function LobbyView() {
                     <div className="flex-1 flex flex-col items-center justify-center text-center text-muted-foreground p-4">
                         <Users className="h-16 w-16 mb-4" />
                         <h3 className='text-lg font-semibold'>You're the first one here!</h3>
-                        <p className='text-sm'>Share the page URL to invite others.</p>
+                        <p className='text-sm'>Invite others by sharing the URL!</p>
                     </div>
                 ) : (
                     <ScrollArea className="flex-1 px-6">
                     <ul className="space-y-2">
                         {onlineUsers.map((user) => (
                         <li
-                            key={user.id}
+                            key={user.uid}
                             className="flex items-center space-x-4 p-2 rounded-lg hover:bg-muted transition-colors"
                         >
                             <Avatar>
-                            <AvatarImage src={`https://placehold.co/40x40.png?text=${user.name.charAt(0)}`} data-ai-hint="person portrait" />
-                            <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
+                            <AvatarImage src={`https://placehold.co/40x40.png?text=${displayName(user).charAt(0)}`} data-ai-hint="person portrait" />
+                            <AvatarFallback>{displayName(user).charAt(0)}</AvatarFallback>
                             </Avatar>
                             <div className="flex-1">
-                            <p className="font-semibold">{user.name}</p>
+                            <p className="font-semibold">{displayName(user)}</p>
                             {user.status === 'in-call' && user.currentCallId ? (
                                 <p className="text-xs text-primary">In a call</p>
                             ) : (
@@ -170,7 +186,7 @@ export function LobbyView() {
             {isMobile && <LobbyChat />}
 
             <div className='flex-shrink-0 p-4 border-t text-sm text-muted-foreground'>
-                Welcome, <span className='font-semibold text-foreground'>{currentUser?.name}</span>
+                Welcome, <span className='font-semibold text-foreground'>{currentUser?.name || 'User'}</span>
             </div>
         </Card>
         
