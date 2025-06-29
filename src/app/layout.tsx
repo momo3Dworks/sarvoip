@@ -4,7 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { UserProvider } from '@/context/UserProvider';
 
 export const metadata: Metadata = {
-  title: 'AmigoTalk',
+  title: 'SARVOX - The Most & Free Private VOIP Service',
   description: 'Private voice calls with your friends.',
 };
 

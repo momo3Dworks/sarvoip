@@ -2,6 +2,8 @@
 
 import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import { db } from '@/lib/firebase';
+import { doc, deleteDoc } from 'firebase/firestore';
 
 interface User {
   id: string;
@@ -46,6 +48,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const logout = () => {
+    if (user) {
+      const userDocRef = doc(db, 'users', user.id);
+      deleteDoc(userDocRef);
+    }
     localStorage.removeItem('sar-user');
     setUser(null);
   };

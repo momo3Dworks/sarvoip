@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useContext } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -49,7 +49,6 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
   }, [callId]);
 
   useEffect(() => {
-    // Auto-scroll to bottom
     if (scrollAreaRef.current) {
         const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
         if (viewport) {
@@ -78,8 +77,8 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
   };
 
   return (
-    <Card className="w-full max-w-sm h-[80vh] flex flex-col">
-      <CardHeader>
+    <div className="w-full h-full flex flex-col bg-card">
+      <CardHeader className="hidden md:block">
         <CardTitle>Chat</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 overflow-hidden p-0">
@@ -115,7 +114,7 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
           </div>
         </ScrollArea>
       </CardContent>
-      <CardFooter>
+      <CardFooter className="border-t p-4">
         <form onSubmit={handleSendMessage} className="flex w-full items-center gap-2">
           <Input
             value={newMessage}
@@ -148,6 +147,6 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
           <Button type="submit">Send</Button>
         </form>
       </CardFooter>
-    </Card>
+    </div>
   );
 }

@@ -20,6 +20,7 @@ import { Phone, LogOut, Loader2, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '../ui/scroll-area';
+import { LobbyChat } from './LobbyChat';
 
 interface OnlineUser {
   id: string;
@@ -40,16 +41,13 @@ export function LobbyView() {
 
     const userDocRef = doc(db, 'users', currentUser.id);
 
-    // Set user as online
     setDoc(userDocRef, { name: currentUser.name, status: 'online', last_seen: serverTimestamp() }, { merge: true });
 
     const handleBeforeUnload = () => {
-        // This is not guaranteed to run, but it's a good fallback
         deleteDoc(userDocRef);
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
 
-    // Listen for user changes
     const usersCollectionRef = collection(db, 'users');
     const unsubscribe = onSnapshot(usersCollectionRef, (snapshot) => {
       const users: OnlineUser[] = [];
@@ -57,7 +55,6 @@ export function LobbyView() {
         if (doc.id !== currentUser.id) {
           users.push({ id: doc.id, ...doc.data() } as OnlineUser);
         } else {
-            // Check if I am being called
             const myData = doc.data();
             if(myData.status === 'in-call' && myData.currentCallId) {
                 router.push(`/call/${myData.currentCallId}`);
@@ -70,8 +67,6 @@ export function LobbyView() {
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      // On component unmount (e.g., logout), set user offline
-      deleteDoc(userDocRef);
       unsubscribe();
     };
   }, [currentUser, router]);
@@ -80,23 +75,19 @@ export function LobbyView() {
     if (!currentUser) return;
 
     try {
-      // Create a new call document
       const callDocRef = await addDoc(collection(db, "calls"), {
         createdAt: serverTimestamp(),
         initiator: currentUser.id,
-        target: targetUser.id,
         participants: {},
       });
       const callId = callDocRef.id;
 
-      // Update both users' status to 'in-call'
       const currentUserDocRef = doc(db, 'users', currentUser.id);
       const targetUserDocRef = doc(db, 'users', targetUser.id);
       
       await updateDoc(currentUserDocRef, { status: 'in-call', currentCallId: callId });
       await updateDoc(targetUserDocRef, { status: 'in-call', currentCallId: callId });
       
-      // The local user is redirected immediately
       router.push(`/call/${callId}`);
 
     } catch (error) {
@@ -113,14 +104,9 @@ export function LobbyView() {
      router.push(`/call/${callId}`);
   };
 
-  const getCallParticipantNames = (callId: string): string => {
-    const participantsInCall = onlineUsers.filter(u => u.currentCallId === callId);
-    return participantsInCall.map(p => p.name).join(', ');
-  }
-
   return (
     <div className="flex h-screen w-full items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md h-[70vh] flex flex-col">
+      <Card className="w-full max-w-md h-[80vh] flex flex-col">
         <CardHeader className='flex-shrink-0'>
           <div className="flex justify-between items-center">
             <CardTitle className="text-2xl">Lobby</CardTitle>
@@ -177,6 +163,7 @@ export function LobbyView() {
             </ScrollArea>
           )}
         </CardContent>
+        <LobbyChat />
          <div className='flex-shrink-0 p-4 border-t text-sm text-muted-foreground'>
             Welcome, <span className='font-semibold text-foreground'>{currentUser?.name}</span>
          </div>
