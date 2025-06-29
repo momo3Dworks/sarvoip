@@ -138,6 +138,22 @@ export function CallView({ callId }: CallViewProps) {
 
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
+            pc.onnegotiationneeded = async () => {
+              if (currentUser && currentUser.uid < participant.uid) {
+                try {
+                  if (pc.signalingState !== 'stable') return;
+                  
+                  const offer = await pc.createOffer();
+                  await pc.setLocalDescription(offer);
+                  if (pc.localDescription) {
+                      await addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, offer: pc.localDescription.toJSON() });
+                  }
+                } catch (err) {
+                    console.error(`Error creating offer for ${participant.uid}:`, err);
+                }
+              }
+            };
+
             pc.onicecandidate = event => {
                 if (event.candidate && currentUser) {
                     addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, candidate: event.candidate.toJSON() });
@@ -157,17 +173,6 @@ export function CallView({ callId }: CallViewProps) {
                     }
                 }
             };
-            
-            try {
-                if(!currentUser) return;
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                if (pc.localDescription) {
-                    await addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, offer: pc.localDescription.toJSON() });
-                }
-            } catch (err) {
-                console.error("Error creating offer:", err);
-            }
         });
         setCallStatus('Connected');
       }, (error) => {
@@ -187,10 +192,6 @@ export function CallView({ callId }: CallViewProps) {
 
                 try {
                     if (message.offer) {
-                        if (pc.signalingState !== 'stable') {
-                             console.log("Ignoring offer, not in stable state");
-                            return;
-                        }
                         await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                         const answer = await pc.createAnswer();
                         await pc.setLocalDescription(answer);
@@ -304,12 +305,18 @@ export function CallView({ callId }: CallViewProps) {
           newSenders.set(peerId, sender);
         });
         screenSendersRef.current = newSenders;
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error starting screen share:', error);
+        let description = 'Could not start screen sharing. Please check your browser permissions.';
+        if (error.name === 'NotAllowedError') {
+            description = 'You denied permission to share your screen. To enable it, you may need to reset permissions for this site in your browser settings.';
+        } else if (error.message && error.message.includes('permissions policy')) {
+            description = 'Screen sharing is blocked by the browser\'s Permissions Policy. This is a server configuration issue. Please ensure the `headers` section in `next.config.ts` allows "display-capture". A server restart might be required for the change to take effect.';
+        }
         toast({
           variant: 'destructive',
           title: 'Screen Share Failed',
-          description: 'Could not start screen sharing. Please check permissions.',
+          description,
         });
         setIsSharingScreen(false);
       }
