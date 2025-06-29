@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, useRef, useContext } from 'react';
@@ -406,7 +407,7 @@ export function CallView({ callId }: CallViewProps) {
               <MessageSquare className="h-8 w-8" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="p-0 w-full max-w-md bg-card/70 backdrop-blur-[4px]">
+          <SheetContent side="left" className="p-0 w-full max-w-md bg-card/80 backdrop-blur-[6px]">
             <SheetHeader className="p-4 border-b">
               <SheetTitle>Chat</SheetTitle>
             </SheetHeader>
@@ -442,7 +443,7 @@ export function CallView({ callId }: CallViewProps) {
         <div className="flex-1 flex flex-col p-4 overflow-hidden">
             {isSomeoneSharing ? (
                 <div className='w-full h-full flex flex-col gap-4'>
-                    <div className='flex-1 bg-black/70 backdrop-blur-[4px] border border-primary/20 relative overflow-hidden'>
+                    <div className='flex-1 bg-black/80 backdrop-blur-[6px] border border-primary/20 relative overflow-hidden'>
                         {isSharingScreen && localScreenStreamRef.current && (
                             <ScreenShareView stream={localScreenStreamRef.current} muted />
                         )}

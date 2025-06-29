@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, useRef, useContext } from 'react';
@@ -209,7 +210,7 @@ export function LobbyChat() {
         <ChatContainer 
             className={cn(
                 "flex flex-col h-full w-full transition-opacity duration-300", 
-                !isMobile && "bg-card/70 backdrop-blur-[4px] border border-primary/20",
+                !isMobile && "bg-card/80 backdrop-blur-[6px] border border-primary/20",
                 isChatActive ? 'opacity-100' : 'opacity-40'
             )}
             onMouseEnter={() => setIsHovering(true)}

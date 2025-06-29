@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -111,7 +112,7 @@ export function ChatView({ callId, currentUser }: ChatViewProps) {
   const displayName = (name: string | null) => name || "Anonymous";
 
   return (
-    <div className="w-full h-full flex flex-col bg-card/70 backdrop-blur-[4px]">
+    <div className="w-full h-full flex flex-col bg-card/80 backdrop-blur-[6px]">
       <CardHeader className="hidden md:block">
         <CardTitle>Chat</CardTitle>
       </CardHeader>

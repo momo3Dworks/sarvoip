@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, useContext } from 'react';
@@ -128,7 +129,7 @@ export function LobbyView() {
   return (
     <div className="flex h-screen w-full items-center justify-center p-4">
       <div className="flex h-full w-full max-w-7xl flex-col md:flex-row md:gap-6">
-        <Card className="flex w-full flex-col md:w-1/2 lg:w-2/5 bg-card/70 backdrop-blur-[4px] border border-primary/20">
+        <Card className="flex w-full flex-col md:w-1/2 lg:w-2/5 bg-card/80 backdrop-blur-[6px] border border-primary/20">
             <CardHeader className='flex-shrink-0'>
                 <div className="flex justify-between items-center">
                     <CardTitle className="text-2xl">Lobby</CardTitle>

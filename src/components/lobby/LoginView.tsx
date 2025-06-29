@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useContext, useState } from 'react';
@@ -58,7 +59,7 @@ export function LoginView() {
 
   return (
     <div className="flex h-screen w-full items-center justify-center p-4">
-      <Card className="w-full max-w-sm bg-card/70 backdrop-blur-[4px] border-primary/20">
+      <Card className="w-full max-w-sm bg-card/80 backdrop-blur-[6px] border-primary/20">
         <CardHeader>
           <CardTitle className="text-2xl">Welcome to SARVOX</CardTitle>
           <CardDescription>Sign in to join the lobby.</CardDescription>
