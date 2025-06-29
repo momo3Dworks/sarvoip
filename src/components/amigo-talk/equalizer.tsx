@@ -21,7 +21,7 @@ export function Equalizer() {
       {heights.map((h, i) => (
         <div
           key={i}
-          className="w-1/3 bg-primary/70 rounded-t-sm transition-all duration-200 ease-in-out"
+          className="w-1/3 bg-primary/70 transition-all duration-200 ease-in-out"
           style={{ height: `${h}%` }}
         />
       ))}

@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect, useRef, useContext } from 'react';
@@ -88,6 +87,8 @@ export function LobbyChat() {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const isChatActive = isFocused || isHovering;
+    const isMobile = useIsMobile();
+    const ChatContainer = isMobile ? 'div' : Card;
 
     useEffect(() => {
         if (!currentUser) return;
@@ -201,8 +202,6 @@ export function LobbyChat() {
         setNewMessage(prev => prev + emoji);
     };
 
-    const isMobile = useIsMobile();
-    const ChatContainer = isMobile ? 'div' : Card;
 
     if (!currentUser) return null;
 
@@ -210,6 +209,7 @@ export function LobbyChat() {
         <ChatContainer 
             className={cn(
                 "flex flex-col h-full w-full transition-opacity duration-300", 
+                !isMobile && "bg-card/70 backdrop-blur-[4px] border border-primary/20",
                 isChatActive ? 'opacity-100' : 'opacity-40'
             )}
             onMouseEnter={() => setIsHovering(true)}

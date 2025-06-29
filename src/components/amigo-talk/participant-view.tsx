@@ -65,7 +65,7 @@ export function ParticipantView({
           <AvatarFallback className={cn(isFilmstrip ? 'text-3xl' : 'text-4xl')}>{fallbackChar}</AvatarFallback>
         </Avatar>
         {isMuted && (
-          <div className="absolute bottom-1 right-1 bg-secondary rounded-full p-1.5">
+          <div className="absolute bottom-1 right-1 bg-secondary p-1.5">
             <MicOff className="h-4 w-4 text-secondary-foreground" />
           </div>
         )}

@@ -10,7 +10,7 @@ export default function CallPage() {
 
     if (!callId) {
         return (
-            <div className="flex h-screen w-full items-center justify-center bg-background">
+            <div className="flex h-screen w-full items-center justify-center">
                 <div className="flex flex-col items-center space-y-4">
                     <Skeleton className="h-32 w-32 rounded-full" />
                     <Skeleton className="h-8 w-48" />

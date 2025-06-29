@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect, useRef, useContext } from 'react';
@@ -403,11 +402,11 @@ export function CallView({ callId }: CallViewProps) {
       {isMobile && (
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="outline" size="icon" className="w-16 h-16 rounded-full">
+            <Button variant="outline" size="icon" className="w-16 h-16">
               <MessageSquare className="h-8 w-8" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="p-0 w-full max-w-md">
+          <SheetContent side="left" className="p-0 w-full max-w-md bg-card/70 backdrop-blur-[4px]">
             <SheetHeader className="p-4 border-b">
               <SheetTitle>Chat</SheetTitle>
             </SheetHeader>
@@ -415,22 +414,22 @@ export function CallView({ callId }: CallViewProps) {
           </SheetContent>
         </Sheet>
       )}
-      <Button onClick={toggleMute} variant={isMuted ? 'secondary' : 'default'} size="icon" className="w-16 h-16 rounded-full">
+      <Button onClick={toggleMute} variant={isMuted ? 'secondary' : 'default'} size="icon" className="w-16 h-16">
         {isMuted ? <MicOff className="h-8 w-8" /> : <Mic className="h-8 w-8" />}
       </Button>
-      <Button onClick={handleEndCall} variant="destructive" size="icon" className="w-20 h-20 rounded-full">
+      <Button onClick={handleEndCall} variant="destructive" size="icon" className="w-20 h-20">
         <PhoneOff className="h-10 w-10" />
       </Button>
-      <Button onClick={toggleScreenShare} variant={isSharingScreen ? "secondary" : "default"} size="icon" className="w-16 h-16 rounded-full">
+      <Button onClick={toggleScreenShare} variant={isSharingScreen ? "secondary" : "default"} size="icon" className="w-16 h-16">
         {isSharingScreen ? <ScreenShareOff className="h-8 w-8" /> : <ScreenShare className="h-8 w-8" />}
       </Button>
     </div>
   );
 
   return (
-    <div className="flex h-screen w-full flex-col md:flex-row items-stretch bg-background text-foreground">
+    <div className="flex h-screen w-full flex-col md:flex-row items-stretch text-foreground">
       {!isMobile && currentUser && (
-        <div className="w-full max-w-sm border-r flex-shrink-0">
+        <div className="w-full max-w-sm border-r border-primary/20 flex-shrink-0">
           <ChatView callId={callId} currentUser={currentUser} />
         </div>
       )}
@@ -443,14 +442,14 @@ export function CallView({ callId }: CallViewProps) {
         <div className="flex-1 flex flex-col p-4 overflow-hidden">
             {isSomeoneSharing ? (
                 <div className='w-full h-full flex flex-col gap-4'>
-                    <div className='flex-1 bg-black rounded-lg relative overflow-hidden'>
+                    <div className='flex-1 bg-black/70 backdrop-blur-[4px] border border-primary/20 relative overflow-hidden'>
                         {isSharingScreen && localScreenStreamRef.current && (
                             <ScreenShareView stream={localScreenStreamRef.current} muted />
                         )}
                         {remoteSharer && remoteScreenStream && (
                             <ScreenShareView stream={remoteScreenStream} />
                         )}
-                        <div className="absolute bottom-2 left-2 bg-black/60 text-white px-3 py-1 rounded-full text-sm">
+                        <div className="absolute bottom-2 left-2 bg-black/60 text-white px-3 py-1 text-sm">
                             {isSharingScreen ? "You are sharing your screen" : `${remoteSharer?.name || 'Someone'} is sharing`}
                         </div>
                     </div>

@@ -11,9 +11,9 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-background">
+      <div className="flex h-screen w-full items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
-          <Skeleton className="h-24 w-24 rounded-full" />
+          <Skeleton className="h-24 w-24" />
           <Skeleton className="h-8 w-64" />
           <Skeleton className="h-12 w-48" />
         </div>

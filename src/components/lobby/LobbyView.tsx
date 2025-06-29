@@ -126,9 +126,9 @@ export function LobbyView() {
   const displayName = (user: OnlineUser) => user.name || "Anonymous";
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-background p-4">
+    <div className="flex h-screen w-full items-center justify-center p-4">
       <div className="flex h-full w-full max-w-7xl flex-col md:flex-row md:gap-6">
-        <Card className="flex w-full flex-col md:w-1/2 lg:w-2/5">
+        <Card className="flex w-full flex-col md:w-1/2 lg:w-2/5 bg-card/70 backdrop-blur-[4px] border border-primary/20">
             <CardHeader className='flex-shrink-0'>
                 <div className="flex justify-between items-center">
                     <CardTitle className="text-2xl">Lobby</CardTitle>
