@@ -10,14 +10,10 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Smile, Gift, Loader2 } from 'lucide-react';
+import { Smile } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/hooks/use-toast';
-
-
-const GIPHY_API_KEY = 'YOUR_GIPHY_API_KEY_HERE'; 
 
 const emojis = [
   '😊', '😂', '❤️', '👍', '🤔', '🎉', '🔥', '🙏', '😍', '😭', '🤯', '🥳',
@@ -26,8 +22,7 @@ const emojis = [
 
 interface LobbyMessage {
   id: string;
-  text: string; 
-  type: 'text' | 'gif';
+  text: string;
   senderId: string;
   senderName: string | null;
   timestamp: any;
@@ -43,11 +38,7 @@ const Message = ({ message }: { message: LobbyMessage }) => {
     return (
         <div>
             <span className="font-black uppercase">{senderName}:</span>
-            {message.type === 'text' ? (
-                <span className="ml-2">{message.text}</span>
-            ) : (
-                <img src={message.text} alt="GIF" className="mt-2 rounded-md max-w-xs" />
-            )}
+            <span className="ml-2">{message.text}</span>
         </div>
     );
 };
@@ -80,11 +71,6 @@ export function LobbyChat() {
     const [isFocused, setIsFocused] = useState(false);
     const [isHovering, setIsHovering] = useState(false);
     
-    const [gifSearchTerm, setGifSearchTerm] = useState("");
-    const [debouncedGifSearchTerm, setDebouncedGifSearchTerm] = useState("");
-    const [gifResults, setGifResults] = useState<any[]>([]);
-    const [isSearchingGifs, setIsSearchingGifs] = useState(false);
-
     const scrollAreaRef = useRef<HTMLDivElement>(null);
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -140,42 +126,6 @@ export function LobbyChat() {
         }
     }, [messages]);
 
-    useEffect(() => {
-        const handler = setTimeout(() => {
-          setDebouncedGifSearchTerm(gifSearchTerm);
-        }, 500);
-    
-        return () => {
-          clearTimeout(handler);
-        };
-    }, [gifSearchTerm]);
-
-    useEffect(() => {
-        if (debouncedGifSearchTerm.trim() === "") {
-            setGifResults([]);
-            return;
-        }
-
-        const searchGifs = async () => {
-            if (GIPHY_API_KEY === 'YOUR_GIPHY_API_KEY_HERE') {
-                console.warn("GIPHY API Key not set. Please update it in LobbyChat.tsx");
-                return;
-            }
-            setIsSearchingGifs(true);
-            try {
-                const response = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(debouncedGifSearchTerm)}&limit=12`);
-                const { data } = await response.json();
-                setGifResults(data || []);
-            } catch (error) {
-                console.error("Failed to fetch GIFs from GIPHY", error);
-            } finally {
-                setIsSearchingGifs(false);
-            }
-        };
-
-        searchGifs();
-    }, [debouncedGifSearchTerm]);
-
     const updateTypingStatus = () => {
         if (!currentUser) return;
         if (typingTimeoutRef.current) {
@@ -197,7 +147,6 @@ export function LobbyChat() {
         const messagesColRef = collection(db, 'lobby_chat');
         await addDoc(messagesColRef, {
             text: newMessage.trim(),
-            type: 'text',
             senderId: currentUser.uid,
             senderName: currentUser.name,
             timestamp: serverTimestamp(),
@@ -206,18 +155,6 @@ export function LobbyChat() {
         setNewMessage('');
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         deleteDoc(doc(db, 'lobby_typing', currentUser.uid));
-    };
-    
-    const handleSendGif = async (gifUrl: string) => {
-        if (!currentUser) return;
-        const messagesColRef = collection(db, 'lobby_chat');
-        await addDoc(messagesColRef, {
-            text: gifUrl,
-            type: 'gif',
-            senderId: currentUser.uid,
-            senderName: currentUser.name,
-            timestamp: serverTimestamp(),
-        });
     };
 
     const handleEmojiSelect = (emoji: string) => {
@@ -244,7 +181,7 @@ export function LobbyChat() {
                 </CardHeader>
             )}
             <CardContent className="flex-1 overflow-hidden p-2 md:p-6 flex flex-col">
-                <ScrollArea className="flex-grow pr-4" ref={scrollAreaRef}>
+                <ScrollArea className="flex-grow pr-4 lobby-chat-scrollbar" ref={scrollAreaRef}>
                     <div className="space-y-4">
                         {messages.map((msg) => <Message key={msg.id} message={msg} /> )}
                     </div>
@@ -272,45 +209,14 @@ export function LobbyChat() {
                                 <Smile className="h-5 w-5" />
                             </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-80 border-2">
-                             <Tabs defaultValue="emoji">
-                                <TabsList className="grid w-full grid-cols-2">
-                                    <TabsTrigger value="emoji"><Smile className="mr-2" /> Emojis</TabsTrigger>
-                                    <TabsTrigger value="gif"><Gift className="mr-2" /> GIFs</TabsTrigger>
-                                </TabsList>
-                                <TabsContent value="emoji" className="mt-4">
-                                    <div className="grid grid-cols-6 gap-2">
-                                        {emojis.map(emoji => (
-                                        <Button key={emoji} variant="ghost" size="icon" onClick={() => handleEmojiSelect(emoji)} className="text-xl">
-                                            {emoji}
-                                        </Button>
-                                        ))}
-                                    </div>
-                                </TabsContent>
-                                <TabsContent value="gif" className="mt-4">
-                                    <Input 
-                                        placeholder="Search for GIFs..." 
-                                        value={gifSearchTerm}
-                                        onChange={(e) => setGifSearchTerm(e.target.value)}
-                                    />
-                                    {isSearchingGifs ? (
-                                        <div className="flex justify-center items-center h-24">
-                                            <Loader2 className="h-6 w-6 animate-spin" />
-                                        </div>
-                                    ) : (
-                                        <ScrollArea className="h-48 mt-2">
-                                            <div className="grid grid-cols-3 gap-2 pr-4">
-                                            {gifResults.map(gif => (
-                                                <button key={gif.id} type="button" onClick={() => handleSendGif(gif.images.fixed_height.url)} className="rounded-md overflow-hidden focus:ring-2 ring-primary">
-                                                    <img src={gif.images.fixed_height_small.url} alt={gif.title} className="w-full h-full object-cover" />
-                                                </button>
-                                            ))}
-                                            </div>
-                                        </ScrollArea>
-                                    )}
-                                    <p className="text-xs text-muted-foreground mt-2 text-center">Powered by GIPHY</p>
-                                </TabsContent>
-                            </Tabs>
+                        <PopoverContent className="w-auto p-2">
+                            <div className="grid grid-cols-6 gap-2">
+                                {emojis.map(emoji => (
+                                <Button key={emoji} variant="ghost" size="icon" onClick={() => handleEmojiSelect(emoji)} className="text-xl">
+                                    {emoji}
+                                </Button>
+                                ))}
+                            </div>
                         </PopoverContent>
                     </Popover>
                     <Button type="submit">Send</Button>

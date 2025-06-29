@@ -12,6 +12,8 @@ import {
   serverTimestamp,
   addDoc,
   updateDoc,
+  query,
+  where,
 } from 'firebase/firestore';
 import { UserContext } from '@/context/UserProvider';
 import { Button } from '@/components/ui/button';
@@ -47,7 +49,8 @@ export function LobbyView() {
 
     // Listen for other users
     const usersCollectionRef = collection(db, 'users');
-    const unsubscribe = onSnapshot(usersCollectionRef, (snapshot) => {
+    const q = query(usersCollectionRef, where("status", "in", ["online", "in-call"]));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const users: OnlineUser[] = [];
       snapshot.forEach((doc) => {
         // Exclude current user from the list

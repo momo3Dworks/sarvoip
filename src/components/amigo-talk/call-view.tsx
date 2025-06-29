@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, useRef, useContext } from 'react';
@@ -11,23 +12,23 @@ import {
   addDoc,
   deleteDoc,
   setDoc,
-  getDoc,
-  deleteField,
   getDocs,
   query,
   writeBatch,
+  deleteField,
 } from 'firebase/firestore';
 import { UserContext } from '@/context/UserProvider';
 import { Button } from '@/components/ui/button';
-import { Mic, MicOff, PhoneOff, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, MessageSquare, ScreenShare, ScreenShareOff } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardContent } from '../ui/card';
 import { Equalizer } from './equalizer';
 import { ChatView } from './chat-view';
 import { ParticipantView } from './participant-view';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '../ui/scroll-area';
+import { ScreenShareView } from './screen-share-view';
+import { cn } from '@/lib/utils';
 
 interface CallViewProps {
   callId: string;
@@ -55,10 +56,15 @@ export function CallView({ callId }: CallViewProps) {
 
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
-  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  const localScreenStreamRef = useRef<MediaStream | null>(null);
+  const screenSendersRef = useRef<Map<string, RTCRtpSender>>(new Map());
+
+  const [remoteAudioStreams, setRemoteAudioStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [remoteScreenStreams, setRemoteScreenStreams] = useState<Map<string, MediaStream>>(new Map());
   const [participants, setParticipants] = useState<Participant[]>([]);
   
   const [isMuted, setIsMuted] = useState(false);
+  const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [callStatus, setCallStatus] = useState('Connecting...');
 
   const [speaking, setSpeaking] = useState<Map<string, boolean>>(new Map());
@@ -105,14 +111,18 @@ export function CallView({ callId }: CallViewProps) {
         setParticipants(currentParticipants);
         const remoteParticipants = currentParticipants.filter(p => p.uid !== currentUser.uid);
 
-        // Remove connections for participants who have left
         peersRef.current.forEach((pc, peerId) => {
             if (!remoteParticipants.some(p => p.uid === peerId)) {
                 pc.close();
                 peersRef.current.delete(peerId);
                 analysersRef.current.get(peerId)?.source.disconnect();
                 analysersRef.current.delete(peerId);
-                setRemoteStreams(prev => {
+                setRemoteAudioStreams(prev => {
+                    const newMap = new Map(prev);
+                    newMap.delete(peerId);
+                    return newMap;
+                });
+                 setRemoteScreenStreams(prev => {
                     const newMap = new Map(prev);
                     newMap.delete(peerId);
                     return newMap;
@@ -120,7 +130,6 @@ export function CallView({ callId }: CallViewProps) {
             }
         });
 
-        // Create connections for new participants
         remoteParticipants.forEach(async (participant) => {
             if (peersRef.current.has(participant.uid) || !currentUser) return;
 
@@ -136,17 +145,19 @@ export function CallView({ callId }: CallViewProps) {
             };
 
             pc.ontrack = event => {
-                const stream = event.streams[0];
-                setRemoteStreams(prev => new Map(prev).set(participant.uid, stream));
-                if (audioContextRef.current && !analysersRef.current.has(participant.uid)) {
-                    const analyser = audioContextRef.current.createAnalyser();
-                    const source = audioContextRef.current.createMediaStreamSource(stream);
-                    source.connect(analyser);
-                    analysersRef.current.set(participant.uid, { analyser, source });
+                if (event.track.kind === 'video') {
+                     setRemoteScreenStreams(prev => new Map(prev).set(participant.uid, event.streams[0]));
+                } else if (event.track.kind === 'audio') {
+                    setRemoteAudioStreams(prev => new Map(prev).set(participant.uid, event.streams[0]));
+                    if (audioContextRef.current && !analysersRef.current.has(participant.uid)) {
+                        const analyser = audioContextRef.current.createAnalyser();
+                        const source = audioContextRef.current.createMediaStreamSource(event.streams[0]);
+                        source.connect(analyser);
+                        analysersRef.current.set(participant.uid, { analyser, source });
+                    }
                 }
             };
             
-            // Create and send offer
             try {
                 if(!currentUser) return;
                 const offer = await pc.createOffer();
@@ -218,8 +229,10 @@ export function CallView({ callId }: CallViewProps) {
     return () => {
         unsubscribePromise.then(unsub => unsub && unsub());
         localStreamRef.current?.getTracks().forEach(track => track.stop());
+        localScreenStreamRef.current?.getTracks().forEach(track => track.stop());
         peersRef.current.forEach(pc => pc.close());
         peersRef.current.clear();
+        screenSendersRef.current.clear();
         analysersRef.current.forEach(({ source }) => source.disconnect());
         analysersRef.current.clear();
         localAnalyserRef.current?.source.disconnect();
@@ -255,7 +268,63 @@ export function CallView({ callId }: CallViewProps) {
         return () => cancelAnimationFrame(animationFrameId);
     }, [speaking, isMuted, currentUser]);
 
+    const stopScreenShare = (notifyPeers = true) => {
+      setIsSharingScreen(false);
+      localScreenStreamRef.current?.getTracks().forEach(track => track.stop());
+      localScreenStreamRef.current = null;
+
+      if (notifyPeers) {
+        screenSendersRef.current.forEach((sender, peerId) => {
+          const pc = peersRef.current.get(peerId);
+          if (pc) {
+            pc.removeTrack(sender);
+          }
+        });
+        screenSendersRef.current.clear();
+      }
+    };
+    
+    const startScreenShare = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        localScreenStreamRef.current = stream;
+        setIsSharingScreen(true);
+    
+        const screenTrack = stream.getVideoTracks()[0];
+        if (!screenTrack) {
+            stopScreenShare();
+            return;
+        }
+
+        screenTrack.onended = () => stopScreenShare();
+    
+        const newSenders = new Map<string, RTCRtpSender>();
+        peersRef.current.forEach((pc, peerId) => {
+          const sender = pc.addTrack(screenTrack, stream);
+          newSenders.set(peerId, sender);
+        });
+        screenSendersRef.current = newSenders;
+      } catch (error) {
+        console.error('Error starting screen share:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Screen Share Failed',
+          description: 'Could not start screen sharing. Please check permissions.',
+        });
+        setIsSharingScreen(false);
+      }
+    };
+
+    const toggleScreenShare = () => {
+        if (isSharingScreen) {
+          stopScreenShare();
+        } else {
+          startScreenShare();
+        }
+      };
+      
   const handleEndCall = async () => {
+    stopScreenShare(false);
     setCallStatus('Call ended');
     if(currentUser) {
         const userDocRef = doc(db, 'users', currentUser.uid);
@@ -294,8 +363,19 @@ export function CallView({ callId }: CallViewProps) {
   const localParticipant = currentUser ? participants.find(p => p.uid === currentUser.uid) : null;
   const remoteParticipants = currentUser ? participants.filter(p => p.uid !== currentUser.uid) : participants;
 
-  const ParticipantsGrid = () => (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-8 p-4">
+  const remoteSharerId = remoteScreenStreams.keys().next().value;
+  const remoteSharer = remoteParticipants.find(p => p.uid === remoteSharerId);
+  const remoteScreenStream = remoteSharerId ? remoteScreenStreams.get(remoteSharerId) : null;
+  const isSomeoneSharing = isSharingScreen || !!remoteSharer;
+
+  const ParticipantsGrid = ({ isFilmstrip = false }: { isFilmstrip?: boolean }) => (
+    <div
+      className={cn(
+        isFilmstrip
+          ? 'flex flex-row space-x-4 p-2'
+          : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-8 p-4'
+      )}
+    >
       {localParticipant && (
         <ParticipantView
           key={localParticipant.uid}
@@ -303,71 +383,97 @@ export function CallView({ callId }: CallViewProps) {
           isMuted={isMuted}
           isLocalParticipant={true}
           isSpeaking={speaking.get(localParticipant.uid) || false}
+          isFilmstrip={isFilmstrip}
         />
       )}
       {remoteParticipants.map(p => (
         <ParticipantView
           key={p.uid}
           participant={p}
-          stream={remoteStreams.get(p.uid)}
+          stream={remoteAudioStreams.get(p.uid)}
           isSpeaking={speaking.get(p.uid) || false}
+          isFilmstrip={isFilmstrip}
         />
       ))}
     </div>
   );
 
   const CallControls = () => (
-    <div className="flex items-center space-x-4">
-        {isMobile && (
-            <Sheet>
-                <SheetTrigger asChild>
-                     <Button variant="outline" size="icon" className="w-16 h-16 rounded-full">
-                        <MessageSquare className="h-8 w-8" />
-                    </Button>
-                </SheetTrigger>
-                <SheetContent side="left" className="p-0 w-full max-w-md">
-                    <SheetHeader className="p-4 border-b">
-                        <SheetTitle>Chat</SheetTitle>
-                    </SheetHeader>
-                    {currentUser && <ChatView callId={callId} currentUser={currentUser} />}
-                </SheetContent>
-            </Sheet>
-        )}
-      <Button onClick={toggleMute} variant={isMuted ? "secondary" : "default"} size="icon" className="w-16 h-16 rounded-full">
+    <div className="flex items-center justify-center space-x-4">
+      {isMobile && (
+        <Sheet>
+          <SheetTrigger asChild>
+            <Button variant="outline" size="icon" className="w-16 h-16 rounded-full">
+              <MessageSquare className="h-8 w-8" />
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="p-0 w-full max-w-md">
+            <SheetHeader className="p-4 border-b">
+              <SheetTitle>Chat</SheetTitle>
+            </SheetHeader>
+            {currentUser && <ChatView callId={callId} currentUser={currentUser} />}
+          </SheetContent>
+        </Sheet>
+      )}
+      <Button onClick={toggleMute} variant={isMuted ? 'secondary' : 'default'} size="icon" className="w-16 h-16 rounded-full">
         {isMuted ? <MicOff className="h-8 w-8" /> : <Mic className="h-8 w-8" />}
       </Button>
       <Button onClick={handleEndCall} variant="destructive" size="icon" className="w-20 h-20 rounded-full">
         <PhoneOff className="h-10 w-10" />
+      </Button>
+      <Button onClick={toggleScreenShare} variant={isSharingScreen ? "secondary" : "default"} size="icon" className="w-16 h-16 rounded-full">
+        {isSharingScreen ? <ScreenShareOff className="h-8 w-8" /> : <ScreenShare className="h-8 w-8" />}
       </Button>
     </div>
   );
 
   return (
     <div className="flex h-screen w-full flex-col md:flex-row items-stretch bg-background text-foreground">
-        {!isMobile && currentUser && (
-            <div className="w-full max-w-sm border-r">
-                 <ChatView callId={callId} currentUser={currentUser} />
-            </div>
-        )}
+      {!isMobile && currentUser && (
+        <div className="w-full max-w-sm border-r flex-shrink-0">
+          <ChatView callId={callId} currentUser={currentUser} />
+        </div>
+      )}
 
-      <div className="relative flex-1 flex flex-col items-center justify-center p-4">
+      <div className="relative flex-1 flex flex-col items-stretch">
         <div className="absolute top-6 left-6 z-10">
           <Equalizer />
         </div>
-        <Card className="w-full h-full flex flex-col items-center justify-between border-0 md:border shadow-none">
-          <CardContent className="w-full flex flex-col items-center justify-center p-2 md:p-8">
-            <h2 className="text-2xl font-bold mb-2">Voice Call</h2>
-            <p className="text-muted-foreground mb-8">{callStatus}</p>
-          </CardContent>
-          
-          <ScrollArea className="flex-grow w-full">
-            <ParticipantsGrid />
-          </ScrollArea>
-          
-          <div className="p-6">
-            <CallControls />
-          </div>
-        </Card>
+        
+        <div className="flex-1 flex flex-col p-4 overflow-hidden">
+            {isSomeoneSharing ? (
+                <div className='w-full h-full flex flex-col gap-4'>
+                    <div className='flex-1 bg-black rounded-lg relative overflow-hidden'>
+                        {isSharingScreen && localScreenStreamRef.current && (
+                            <ScreenShareView stream={localScreenStreamRef.current} muted />
+                        )}
+                        {remoteSharer && remoteScreenStream && (
+                            <ScreenShareView stream={remoteScreenStream} />
+                        )}
+                        <div className="absolute bottom-2 left-2 bg-black/60 text-white px-3 py-1 rounded-full text-sm">
+                            {isSharingScreen ? "You are sharing your screen" : `${remoteSharer?.name || 'Someone'} is sharing`}
+                        </div>
+                    </div>
+                    <div className={cn("flex-shrink-0", isMobile ? 'h-32' : 'h-48')}>
+                        <ScrollArea className='h-full w-full'>
+                            <ParticipantsGrid isFilmstrip />
+                        </ScrollArea>
+                    </div>
+                </div>
+            ) : (
+                <div className='w-full h-full flex flex-col items-center justify-center'>
+                    <h2 className="text-2xl font-bold mb-2">Voice Call</h2>
+                    <p className="text-muted-foreground mb-8">{callStatus}</p>
+                    <ScrollArea className="flex-grow w-full max-w-5xl">
+                        <ParticipantsGrid />
+                    </ScrollArea>
+                </div>
+            )}
+        </div>
+
+        <div className="p-6 flex-shrink-0">
+          <CallControls />
+        </div>
       </div>
     </div>
   );

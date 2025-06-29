@@ -8,10 +8,12 @@ import {
   signOut, 
   onAuthStateChanged, 
   User as FirebaseUser,
-  signInWithEmailAndPassword
+  signInWithEmailAndPassword,
+  signInWithRedirect
 } from 'firebase/auth';
-import { doc, updateDoc, setDoc } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface User {
   uid: string;
@@ -38,6 +40,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
@@ -48,7 +51,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
           name: name,
         };
         // Ensure user's name is set in Firestore for display in lobby
-        setDoc(doc(db, 'users', firebaseUser.uid), { name }, { merge: true });
+        setDoc(doc(db, 'users', firebaseUser.uid), { name, status: 'online', last_seen: serverTimestamp() }, { merge: true });
         setUser(appUser);
       } else {
         setUser(null);
@@ -60,15 +63,21 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const loginWithGoogle = async () => {
+    setLoading(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      if (isMobile) {
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
     } catch (error: any) {
         console.error("Authentication error:", error);
         let description = 'Could not sign in with Google. Please try again.';
         
         if (error.code === 'auth/unauthorized-domain') {
-          description = "This app's domain is not authorized for Google Sign-In. Please add it in your Firebase console's Authentication settings.";
+          description = "This app's domain is not authorized for Google Sign-In. Please add it in your Firebase console's Authentication settings under 'Authorized domains'.";
         } else if (error.code === 'auth/popup-closed-by-user') {
+          setLoading(false);
           return;
         }
 
@@ -77,11 +86,13 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
             title: 'Authentication Error',
             description: description,
         });
+        setLoading(false);
         throw error;
     }
   };
 
   const loginWithEmail = async (email: string, pass: string) => {
+    setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, pass);
     } catch (error: any) {
@@ -95,6 +106,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         title: 'Login Failed',
         description,
       });
+      setLoading(false);
       throw error;
     }
   };
@@ -103,7 +115,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (auth.currentUser) {
       const userDocRef = doc(db, 'users', auth.currentUser.uid);
       try {
-        await updateDoc(userDocRef, { status: 'offline' });
+        await updateDoc(userDocRef, { status: 'offline', last_seen: serverTimestamp() });
       } catch (error) {
         console.warn("Could not update user status to offline on logout", error);
       }
