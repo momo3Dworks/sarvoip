@@ -142,22 +142,21 @@ export function CallView({ callId }: CallViewProps) {
 
             localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
 
-            const isCaller = currentUser.uid < participant.uid;
+            const isCaller = currentUser.uid > participant.uid;
             
-            if (isCaller) {
-              pc.onnegotiationneeded = async () => {
-                try {
-                  if (pc.signalingState !== 'stable') return;
+            pc.onnegotiationneeded = async () => {
+              try {
+                if(isCaller) {
                   const offer = await pc.createOffer();
                   await pc.setLocalDescription(offer);
                   if (pc.localDescription && currentUser) {
                       await addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, offer: pc.localDescription.toJSON() });
                   }
-                } catch (err) {
-                    console.error(`(Caller) Error creating offer for ${participant.uid}:`, err);
                 }
-              };
-            }
+              } catch (err) {
+                  console.error(`Error creating offer for ${participant.uid}:`, err);
+              }
+            };
 
             pc.onicecandidate = event => {
                 if (event.candidate && currentUser) {
@@ -167,6 +166,20 @@ export function CallView({ callId }: CallViewProps) {
 
             pc.ontrack = event => {
                 const stream = event.streams[0];
+                if (!stream) return;
+
+                stream.onremovetrack = (ev) => {
+                    if (ev.track.kind === 'video' && stream.getVideoTracks().length === 0) {
+                        setRemoteScreenStreams(prev => {
+                            const newMap = new Map(prev);
+                            if (newMap.get(participant.uid) === stream) {
+                                newMap.delete(participant.uid);
+                            }
+                            return newMap;
+                        })
+                    }
+                };
+
                 if (event.track.kind === 'video') {
                      setRemoteScreenStreams(prev => new Map(prev).set(participant.uid, stream));
                 } else if (event.track.kind === 'audio') {
@@ -204,6 +217,11 @@ export function CallView({ callId }: CallViewProps) {
 
             try {
                 if (message.offer) {
+                    if (pc.signalingState !== "stable") {
+                      // Handle glare, let the caller win
+                      const isCaller = currentUser.uid > peerId;
+                      if (!isCaller) return;
+                    }
                     await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                     const answer = await pc.createAnswer();
                     await pc.setLocalDescription(answer);
@@ -288,22 +306,20 @@ export function CallView({ callId }: CallViewProps) {
         return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
     }, []);
 
-    const stopScreenShare = (notifyPeers = true) => {
+    const stopScreenShare = () => {
       setIsSharingScreen(false);
       
-      if (notifyPeers) {
-        screenSendersRef.current.forEach((senders, peerId) => {
-          const pc = peersRef.current.get(peerId);
-          if (pc) {
-            senders.forEach(sender => {
-                if (pc.getSenders().includes(sender)) {
-                    pc.removeTrack(sender);
-                }
-            });
-          }
-        });
-        screenSendersRef.current.clear();
-      }
+      screenSendersRef.current.forEach((senders, peerId) => {
+        const pc = peersRef.current.get(peerId);
+        if (pc) {
+          senders.forEach(sender => {
+              if (pc.getSenders().includes(sender)) {
+                  pc.removeTrack(sender);
+              }
+          });
+        }
+      });
+      screenSendersRef.current.clear();
 
       localScreenStreamRef.current?.getTracks().forEach(track => track.stop());
       localScreenStreamRef.current = null;
@@ -329,8 +345,7 @@ export function CallView({ callId }: CallViewProps) {
             stopScreenShare();
             return;
         }
-
-        videoTrack.onended = () => stopScreenShare();
+        videoTrack.onended = stopScreenShare;
     
         const newSenders = new Map<string, RTCRtpSender[]>();
         peersRef.current.forEach((pc, peerId) => {
@@ -368,7 +383,9 @@ export function CallView({ callId }: CallViewProps) {
       };
       
   const handleEndCall = async () => {
-    stopScreenShare(false);
+    if (isSharingScreen) {
+      stopScreenShare();
+    }
     setCallStatus('Call ended');
     if(currentUser) {
         const userDocRef = doc(db, 'users', currentUser.uid);
@@ -427,7 +444,7 @@ export function CallView({ callId }: CallViewProps) {
         shares.set(uid, stream);
     });
     return shares;
-  }, [isSharingScreen, localScreenStreamRef, remoteScreenStreams, currentUser]);
+  }, [isSharingScreen, remoteScreenStreams, currentUser]);
 
   useEffect(() => {
     if (allShares.size === 0) {
@@ -588,3 +605,5 @@ export function CallView({ callId }: CallViewProps) {
     </div>
   );
 }
+
+    
