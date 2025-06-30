@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef, useContext } from 'react';
+import React, { useState, useEffect, useRef, useContext, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import {
@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { UserContext } from '@/context/UserProvider';
 import { Button } from '@/components/ui/button';
-import { Mic, MicOff, PhoneOff, MessageSquare, ScreenShare, ScreenShareOff } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, MessageSquare, ScreenShare, ScreenShareOff, Maximize, Minimize } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Equalizer } from './equalizer';
 import { ChatView } from './chat-view';
@@ -58,6 +58,7 @@ export function CallView({ callId }: CallViewProps) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const localScreenStreamRef = useRef<MediaStream | null>(null);
   const screenSendersRef = useRef<Map<string, RTCRtpSender>>(new Map());
+  const mainScreenViewRef = useRef<HTMLDivElement>(null);
 
   const [remoteAudioStreams, setRemoteAudioStreams] = useState<Map<string, MediaStream>>(new Map());
   const [remoteScreenStreams, setRemoteScreenStreams] = useState<Map<string, MediaStream>>(new Map());
@@ -66,6 +67,9 @@ export function CallView({ callId }: CallViewProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [callStatus, setCallStatus] = useState('Connecting...');
+  const [selectedScreenShareId, setSelectedScreenShareId] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
 
   const [speaking, setSpeaking] = useState<Map<string, boolean>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -104,7 +108,7 @@ export function CallView({ callId }: CallViewProps) {
         return;
       }
 
-      await setDoc(doc(participantsColRef, currentUser.uid), { name: currentUser.name });
+      await setDoc(doc(participantsColRef, currentUser.uid), { name: currentUser.name, avatarUrl: currentUser.avatarUrl });
 
       const participantsUnsub = onSnapshot(participantsColRef, (snapshot) => {
         const currentParticipants = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }) as Participant);
@@ -192,7 +196,9 @@ export function CallView({ callId }: CallViewProps) {
 
                 try {
                     if (message.offer) {
-                        await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
+                        if (pc.signalingState !== 'stable') {
+                            await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
+                        }
                         const answer = await pc.createAnswer();
                         await pc.setLocalDescription(answer);
                         if (pc.localDescription) {
@@ -269,6 +275,14 @@ export function CallView({ callId }: CallViewProps) {
         return () => cancelAnimationFrame(animationFrameId);
     }, [speaking, isMuted, currentUser]);
 
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }, []);
+
     const stopScreenShare = (notifyPeers = true) => {
       setIsSharingScreen(false);
       localScreenStreamRef.current?.getTracks().forEach(track => track.stop());
@@ -286,10 +300,18 @@ export function CallView({ callId }: CallViewProps) {
     };
     
     const startScreenShare = async () => {
+      if (!currentUser) return;
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getDisplayMedia({ 
+          video: {
+            frameRate: 30,
+            cursor: "always",
+          }, 
+          audio: true 
+        });
         localScreenStreamRef.current = stream;
         setIsSharingScreen(true);
+        setSelectedScreenShareId(currentUser.uid);
     
         const screenTrack = stream.getVideoTracks()[0];
         if (!screenTrack) {
@@ -366,14 +388,50 @@ export function CallView({ callId }: CallViewProps) {
     localStreamRef.current.getAudioTracks().forEach(track => { track.enabled = !track.enabled; });
     setIsMuted(prev => !prev);
   };
+  
+  const handleToggleFullscreen = () => {
+    if (!mainScreenViewRef.current) return;
+    if (isFullscreen) {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        }
+    } else {
+        mainScreenViewRef.current.requestFullscreen();
+    }
+  };
 
   const localParticipant = currentUser ? participants.find(p => p.uid === currentUser.uid) : null;
   const remoteParticipants = currentUser ? participants.filter(p => p.uid !== currentUser.uid) : participants;
 
-  const remoteSharerId = remoteScreenStreams.keys().next().value;
-  const remoteSharer = remoteParticipants.find(p => p.uid === remoteSharerId);
-  const remoteScreenStream = remoteSharerId ? remoteScreenStreams.get(remoteSharerId) : null;
-  const isSomeoneSharing = isSharingScreen || !!remoteSharer;
+  const allShares = useMemo(() => {
+    const shares = new Map<string, MediaStream>();
+    if (isSharingScreen && localScreenStreamRef.current && currentUser) {
+        shares.set(currentUser.uid, localScreenStreamRef.current);
+    }
+    remoteScreenStreams.forEach((stream, uid) => {
+        shares.set(uid, stream);
+    });
+    return shares;
+  }, [isSharingScreen, localScreenStreamRef, remoteScreenStreams, currentUser]);
+
+  useEffect(() => {
+    if (allShares.size === 0) {
+        setSelectedScreenShareId(null);
+        return;
+    }
+    if (!selectedScreenShareId || !allShares.has(selectedScreenShareId)) {
+        setSelectedScreenShareId(allShares.keys().next().value);
+    }
+  }, [allShares, selectedScreenShareId]);
+
+  const isSomeoneSharing = allShares.size > 0;
+  const selectedStream = selectedScreenShareId ? allShares.get(selectedScreenShareId) : null;
+  const selectedSharer = participants.find(p => p.uid === selectedScreenShareId);
+  
+  const thumbnailShares = new Map(allShares);
+  if (selectedScreenShareId) {
+    thumbnailShares.delete(selectedScreenShareId);
+  }
 
   const ParticipantsGrid = ({ isFilmstrip = false }: { isFilmstrip?: boolean }) => (
     <div
@@ -450,21 +508,51 @@ export function CallView({ callId }: CallViewProps) {
         <div className="flex-1 flex flex-col p-4 overflow-hidden">
             {isSomeoneSharing ? (
                 <div className='w-full h-full flex flex-col gap-4'>
-                    <div className='flex-1 bg-black/80 backdrop-blur-[6px] border border-primary/20 relative overflow-hidden'>
-                        {isSharingScreen && localScreenStreamRef.current && (
-                            <ScreenShareView stream={localScreenStreamRef.current} muted />
+                    <div ref={mainScreenViewRef} className='flex-1 bg-black/80 backdrop-blur-[6px] border border-primary/20 relative overflow-hidden'>
+                        {selectedStream && (
+                            <ScreenShareView stream={selectedStream} muted={selectedScreenShareId === currentUser?.uid} />
                         )}
-                        {remoteSharer && remoteScreenStream && (
-                            <ScreenShareView stream={remoteScreenStream} />
-                        )}
-                        <div className="absolute bottom-2 left-2 bg-black/60 text-white px-3 py-1 text-sm">
-                            {isSharingScreen ? "You are sharing your screen" : `${remoteSharer?.name || 'Someone'} is sharing`}
+                        <div className="absolute bottom-2 left-2 bg-black/60 text-white px-3 py-1 text-sm rounded">
+                           {selectedSharer?.uid === currentUser?.uid ? "You are sharing your screen" : `${selectedSharer?.name || 'Someone'} is sharing`}
+                        </div>
+                        <div className="absolute top-2 right-2">
+                            <Button onClick={handleToggleFullscreen} variant="ghost" size="icon" className="text-white hover:bg-white/20 hover:text-white">
+                                {isFullscreen ? <Minimize className="h-6 w-6" /> : <Maximize className="h-6 w-6" />}
+                                <span className="sr-only">{isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}</span>
+                            </Button>
                         </div>
                     </div>
+
                     <div className={cn("flex-shrink-0", isMobile ? 'h-32' : 'h-48')}>
-                        <ScrollArea className='h-full w-full'>
-                            <ParticipantsGrid isFilmstrip />
-                        </ScrollArea>
+                      <ScrollArea className='h-full w-full'>
+                        <div className="flex flex-row items-center h-full p-2 space-x-4">
+                          <ParticipantsGrid isFilmstrip />
+                          
+                          {thumbnailShares.size > 0 && (
+                            <>
+                              <div className="h-full w-px bg-border mx-2" />
+                              {Array.from(thumbnailShares.entries()).map(([uid, stream]) => {
+                                const sharer = participants.find(p => p.uid === uid);
+                                return (
+                                  <div
+                                    key={uid}
+                                    onClick={() => setSelectedScreenShareId(uid)}
+                                    className={cn(
+                                      "relative w-48 h-full flex-shrink-0 cursor-pointer overflow-hidden border-2 bg-black",
+                                      selectedScreenShareId === uid ? "border-primary" : "border-transparent hover:border-primary/50"
+                                    )}
+                                  >
+                                    <ScreenShareView stream={stream} muted />
+                                    <div className="absolute bottom-1 left-1 bg-black/60 text-white px-2 py-0.5 text-xs rounded">
+                                      {sharer?.uid === currentUser?.uid ? "You" : sharer?.name || '...'}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </>
+                          )}
+                        </div>
+                      </ScrollArea>
                     </div>
                 </div>
             ) : (

@@ -2,7 +2,6 @@ import type {Metadata} from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 import { UserProvider } from '@/context/UserProvider';
-import MatrixBackground from '@/components/common/matrix-background';
 
 export const metadata: Metadata = {
   title: 'SARVOX - The Most & Free Private VOIP Service',
@@ -22,9 +21,8 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet" />
       </head>
       <body className="font-body antialiased">
-        <MatrixBackground />
         <UserProvider>
-          <div className="relative z-10">
+          <div className="relative">
             {children}
           </div>
         </UserProvider>

@@ -19,34 +19,35 @@ import {
 import { UserContext } from '@/context/UserProvider';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Phone, LogOut, Loader2, Users } from 'lucide-react';
+import { Phone, LogOut, Loader2, Users, Edit } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '../ui/scroll-area';
 import { LobbyChat } from './LobbyChat';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { resizeImage } from '@/lib/utils';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 
 interface OnlineUser {
   uid: string;
   name: string | null;
+  avatarUrl?: string;
   status: 'online' | 'in-call';
   currentCallId?: string;
 }
 
 export function LobbyView() {
-  const { user: currentUser, logout } = useContext(UserContext);
+  const { user: currentUser, logout, updateUserAvatar } = useContext(UserContext);
   const router = useRouter();
   const { toast } = useToast();
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const isMobile = useIsMobile();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     if (!currentUser) return;
-
-    // Set user presence in Firestore
-    const userDocRef = doc(db, 'users', currentUser.uid);
-    setDoc(userDocRef, { name: currentUser.name, status: 'online', last_seen: serverTimestamp() }, { merge: true });
 
     // Listen for other users
     const usersCollectionRef = collection(db, 'users');
@@ -123,8 +124,35 @@ export function LobbyView() {
         });
     }
   };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!currentUser || !e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+
+    if (!file.type.startsWith('image/')) {
+      toast({ variant: 'destructive', title: 'Invalid file type', description: 'Please select an image file.' });
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const resizedAvatarUrl = await resizeImage(file, 256, 256);
+      await updateUserAvatar(resizedAvatarUrl);
+      toast({ title: "Avatar updated!" });
+    } catch (error) {
+      console.error("Error updating avatar:", error);
+      toast({ variant: 'destructive', title: 'Upload Failed', description: 'Could not update your avatar.' });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
   
   const displayName = (user: OnlineUser) => user.name || "Anonymous";
+  const getAvatarUrl = (user: OnlineUser | null) => user?.avatarUrl || `https://placehold.co/40x40/000000/FFFFFF/png?text=${displayName(user as OnlineUser).charAt(0)}`;
+
 
   return (
     <div className="flex h-screen w-full items-center justify-center p-4">
@@ -133,9 +161,35 @@ export function LobbyView() {
             <CardHeader className='flex-shrink-0'>
                 <div className="flex justify-between items-center">
                     <CardTitle className="text-2xl">Lobby</CardTitle>
-                    <Button variant="ghost" size="icon" onClick={logout}>
-                    <LogOut className="h-5 w-5" />
-                    </Button>
+                    <div className='flex items-center gap-2'>
+                        <span className='text-sm text-muted-foreground'>{currentUser?.name || 'User'}</span>
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <div className="relative group cursor-pointer">
+                                    <Avatar>
+                                        <AvatarImage src={getAvatarUrl(currentUser)} data-ai-hint="person" />
+                                        <AvatarFallback>{currentUser?.name?.charAt(0)}</AvatarFallback>
+                                    </Avatar>
+                                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Edit className="h-5 w-5 text-white" />}
+                                    </div>
+                                    <input type="file" ref={fileInputRef} onChange={handleAvatarChange} accept="image/*" className="hidden" />
+                                </div>
+                            </PopoverTrigger>
+                             <PopoverContent className="w-auto p-0" side="bottom" align="end">
+                                <div className='flex flex-col'>
+                                <Button variant='ghost' className='justify-start p-2' onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                                    {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Edit className='mr-2 h-4 w-4' />}
+                                    Change Avatar
+                                </Button>
+                                <Button variant="ghost" className='justify-start p-2 text-destructive hover:text-destructive' onClick={logout}>
+                                    <LogOut className="mr-2 h-4 w-4" />
+                                    Logout
+                                </Button>
+                                </div>
+                            </PopoverContent>
+                        </Popover>
+                    </div>
                 </div>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col p-0 overflow-hidden">
@@ -158,8 +212,8 @@ export function LobbyView() {
                             className="flex items-center space-x-4 p-2 rounded-lg hover:bg-muted transition-colors"
                         >
                             <Avatar>
-                            <AvatarImage src={`https://placehold.co/40x40.png?text=${displayName(user).charAt(0)}`} data-ai-hint="person portrait" />
-                            <AvatarFallback>{displayName(user).charAt(0)}</AvatarFallback>
+                                <AvatarImage src={getAvatarUrl(user)} data-ai-hint="person portrait" />
+                                <AvatarFallback>{displayName(user).charAt(0)}</AvatarFallback>
                             </Avatar>
                             <div className="flex-1">
                             <p className="font-semibold">{displayName(user)}</p>
@@ -189,9 +243,6 @@ export function LobbyView() {
             
             {isMobile && <LobbyChat />}
 
-            <div className='flex-shrink-0 p-4 border-t text-sm text-muted-foreground'>
-                Welcome, <span className='font-semibold text-foreground'>{currentUser?.name || 'User'}</span>
-            </div>
         </Card>
         
         {!isMobile && (
