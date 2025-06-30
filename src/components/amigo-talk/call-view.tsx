@@ -57,7 +57,7 @@ export function CallView({ callId }: CallViewProps) {
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
   const localScreenStreamRef = useRef<MediaStream | null>(null);
-  const screenSendersRef = useRef<Map<string, RTCRtpSender>>(new Map());
+  const screenSendersRef = useRef<Map<string, RTCRtpSender[]>>(new Map());
   const mainScreenViewRef = useRef<HTMLDivElement>(null);
 
   const [remoteAudioStreams, setRemoteAudioStreams] = useState<Map<string, MediaStream>>(new Map());
@@ -135,26 +135,29 @@ export function CallView({ callId }: CallViewProps) {
         });
 
         remoteParticipants.forEach(async (participant) => {
-            if (peersRef.current.has(participant.uid) || !currentUser) return;
+            if (peersRef.current.has(participant.uid) || !currentUser || !localStreamRef.current) return;
 
             const pc = new RTCPeerConnection(servers);
             peersRef.current.set(participant.uid, pc);
 
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+            localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current!));
 
-            pc.onnegotiationneeded = async () => {
-              try {
-                if (pc.signalingState !== 'stable') return;
-                
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                if (pc.localDescription && currentUser) {
-                    await addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, offer: pc.localDescription.toJSON() });
+            const isCaller = currentUser.uid < participant.uid;
+            
+            if (isCaller) {
+              pc.onnegotiationneeded = async () => {
+                try {
+                  if (pc.signalingState !== 'stable') return;
+                  const offer = await pc.createOffer();
+                  await pc.setLocalDescription(offer);
+                  if (pc.localDescription && currentUser) {
+                      await addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, offer: pc.localDescription.toJSON() });
+                  }
+                } catch (err) {
+                    console.error(`(Caller) Error creating offer for ${participant.uid}:`, err);
                 }
-              } catch (err) {
-                  console.error(`Error creating offer for ${participant.uid}:`, err);
-              }
-            };
+              };
+            }
 
             pc.onicecandidate = event => {
                 if (event.candidate && currentUser) {
@@ -163,15 +166,21 @@ export function CallView({ callId }: CallViewProps) {
             };
 
             pc.ontrack = event => {
+                const stream = event.streams[0];
                 if (event.track.kind === 'video') {
-                     setRemoteScreenStreams(prev => new Map(prev).set(participant.uid, event.streams[0]));
+                     setRemoteScreenStreams(prev => new Map(prev).set(participant.uid, stream));
                 } else if (event.track.kind === 'audio') {
-                    setRemoteAudioStreams(prev => new Map(prev).set(participant.uid, event.streams[0]));
-                    if (audioContextRef.current && !analysersRef.current.has(participant.uid)) {
-                        const analyser = audioContextRef.current.createAnalyser();
-                        const source = audioContextRef.current.createMediaStreamSource(event.streams[0]);
-                        source.connect(analyser);
-                        analysersRef.current.set(participant.uid, { analyser, source });
+                    if (stream.getAudioTracks().length > 0) {
+                        const existingStream = remoteAudioStreams.get(participant.uid);
+                        if (existingStream !== stream) {
+                            setRemoteAudioStreams(prev => new Map(prev).set(participant.uid, stream));
+                            if (audioContextRef.current && !analysersRef.current.has(participant.uid)) {
+                                const analyser = audioContextRef.current.createAnalyser();
+                                const source = audioContextRef.current.createMediaStreamSource(stream);
+                                source.connect(analyser);
+                                analysersRef.current.set(participant.uid, { analyser, source });
+                            }
+                        }
                     }
                 }
             };
@@ -195,14 +204,6 @@ export function CallView({ callId }: CallViewProps) {
 
             try {
                 if (message.offer) {
-                    const isPolite = currentUser.uid < peerId;
-                    const amMakingOffer = pc.signalingState !== 'stable';
-
-                    if (amMakingOffer && isPolite) {
-                        console.log(`Glare detected with ${peerId}. I'm polite, so ignoring their offer.`);
-                        return; // Polite peer ignores offer and lets their own offer be answered.
-                    }
-
                     await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
                     const answer = await pc.createAnswer();
                     await pc.setLocalDescription(answer);
@@ -289,18 +290,23 @@ export function CallView({ callId }: CallViewProps) {
 
     const stopScreenShare = (notifyPeers = true) => {
       setIsSharingScreen(false);
-      localScreenStreamRef.current?.getTracks().forEach(track => track.stop());
-      localScreenStreamRef.current = null;
-
+      
       if (notifyPeers) {
-        screenSendersRef.current.forEach((sender, peerId) => {
+        screenSendersRef.current.forEach((senders, peerId) => {
           const pc = peersRef.current.get(peerId);
           if (pc) {
-            pc.removeTrack(sender);
+            senders.forEach(sender => {
+                if (pc.getSenders().includes(sender)) {
+                    pc.removeTrack(sender);
+                }
+            });
           }
         });
         screenSendersRef.current.clear();
       }
+
+      localScreenStreamRef.current?.getTracks().forEach(track => track.stop());
+      localScreenStreamRef.current = null;
     };
     
     const startScreenShare = async () => {
@@ -309,6 +315,7 @@ export function CallView({ callId }: CallViewProps) {
         const stream = await navigator.mediaDevices.getDisplayMedia({ 
           video: {
             frameRate: 30,
+            height: { ideal: 720 },
             cursor: "always",
           }, 
           audio: true 
@@ -317,20 +324,24 @@ export function CallView({ callId }: CallViewProps) {
         setIsSharingScreen(true);
         setSelectedScreenShareId(currentUser.uid);
     
-        const screenTrack = stream.getVideoTracks()[0];
-        if (!screenTrack) {
+        const videoTrack = stream.getVideoTracks()[0];
+        if (!videoTrack) {
             stopScreenShare();
             return;
         }
 
-        screenTrack.onended = () => stopScreenShare();
+        videoTrack.onended = () => stopScreenShare();
     
-        const newSenders = new Map<string, RTCRtpSender>();
+        const newSenders = new Map<string, RTCRtpSender[]>();
         peersRef.current.forEach((pc, peerId) => {
-          const sender = pc.addTrack(screenTrack, stream);
-          newSenders.set(peerId, sender);
+            const senders: RTCRtpSender[] = [];
+            stream.getTracks().forEach(track => {
+                senders.push(pc.addTrack(track, stream));
+            });
+            newSenders.set(peerId, senders);
         });
         screenSendersRef.current = newSenders;
+
       } catch (error: any) {
         console.error('Error starting screen share:', error);
         let description = 'Could not start screen sharing. Please check your browser permissions.';
