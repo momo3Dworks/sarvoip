@@ -18,6 +18,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 interface User {
   uid: string;
   name: string | null;
+  avatarUrl?: string;
 }
 
 interface UserContextType {
@@ -49,9 +50,15 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         const appUser: User = {
           uid: firebaseUser.uid,
           name: name,
+          avatarUrl: firebaseUser.photoURL || undefined,
         };
-        // Ensure user's name is set in Firestore for display in lobby
-        setDoc(doc(db, 'users', firebaseUser.uid), { name, status: 'online', last_seen: serverTimestamp() }, { merge: true });
+        // Ensure user's data is set in Firestore for display in lobby
+        setDoc(doc(db, 'users', firebaseUser.uid), { 
+            name, 
+            status: 'online', 
+            last_seen: serverTimestamp(),
+            avatarUrl: firebaseUser.photoURL || null,
+        }, { merge: true });
         setUser(appUser);
       } else {
         setUser(null);
