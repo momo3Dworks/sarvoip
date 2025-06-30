@@ -143,18 +143,16 @@ export function CallView({ callId }: CallViewProps) {
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
             pc.onnegotiationneeded = async () => {
-              if (currentUser && currentUser.uid < participant.uid) {
-                try {
-                  if (pc.signalingState !== 'stable') return;
-                  
-                  const offer = await pc.createOffer();
-                  await pc.setLocalDescription(offer);
-                  if (pc.localDescription) {
-                      await addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, offer: pc.localDescription.toJSON() });
-                  }
-                } catch (err) {
-                    console.error(`Error creating offer for ${participant.uid}:`, err);
+              try {
+                if (pc.signalingState !== 'stable') return;
+                
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                if (pc.localDescription && currentUser) {
+                    await addDoc(signalingColRef, { from: currentUser.uid, to: participant.uid, offer: pc.localDescription.toJSON() });
                 }
+              } catch (err) {
+                  console.error(`Error creating offer for ${participant.uid}:`, err);
               }
             };
 
@@ -186,38 +184,44 @@ export function CallView({ callId }: CallViewProps) {
       
       const signalingUnsub = onSnapshot(query(signalingColRef), (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
-            if (change.type === 'added' && currentUser) {
-                const message = change.doc.data();
-                if (message.to !== currentUser.uid) return;
+            if (change.type !== 'added' || !currentUser) return;
+            
+            const message = change.doc.data();
+            if (message.to !== currentUser.uid) return;
 
-                const peerId = message.from;
-                const pc = peersRef.current.get(peerId);
-                if (!pc) return;
+            const peerId = message.from;
+            const pc = peersRef.current.get(peerId);
+            if (!pc) return;
 
-                try {
-                    if (message.offer) {
-                        if (pc.signalingState !== 'stable') {
-                            await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
-                        }
-                        const answer = await pc.createAnswer();
-                        await pc.setLocalDescription(answer);
-                        if (pc.localDescription) {
-                            await addDoc(signalingColRef, { from: currentUser.uid, to: peerId, answer: pc.localDescription.toJSON() });
-                        }
-                    } else if (message.answer) {
-                        if (pc.signalingState === 'have-local-offer') {
-                            await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
-                        }
-                    } else if (message.candidate) {
-                        if (pc.remoteDescription) {
-                            await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
-                        }
+            try {
+                if (message.offer) {
+                    const isPolite = currentUser.uid < peerId;
+                    const amMakingOffer = pc.signalingState !== 'stable';
+
+                    if (amMakingOffer && isPolite) {
+                        console.log(`Glare detected with ${peerId}. I'm polite, so ignoring their offer.`);
+                        return; // Polite peer ignores offer and lets their own offer be answered.
                     }
-                } catch (err) {
-                    console.error("Signaling error:", err);
-                } finally {
-                    await deleteDoc(change.doc.ref);
+
+                    await pc.setRemoteDescription(new RTCSessionDescription(message.offer));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    if (pc.localDescription) {
+                        await addDoc(signalingColRef, { from: currentUser.uid, to: peerId, answer: pc.localDescription.toJSON() });
+                    }
+                } else if (message.answer) {
+                    if (pc.signalingState === 'have-local-offer') {
+                        await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
+                    }
+                } else if (message.candidate) {
+                    if (pc.remoteDescription) {
+                        await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+                    }
                 }
+            } catch (err) {
+                console.error("Signaling error:", err);
+            } finally {
+                await deleteDoc(change.doc.ref);
             }
         });
       }, (error) => {
